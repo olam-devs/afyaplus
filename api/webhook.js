@@ -28,11 +28,16 @@ module.exports = async function handler(req, res) {
         const message = change.messages[0];
         const from = message.from; // sender phone number
 
-        // Process message asynchronously but respond 200 immediately
-        // to avoid WhatsApp retry timeouts
-        handleMessage(from, message).catch((err) => {
+        console.log("INCOMING:", { from, type: message.type, body: message.text?.body || message.interactive?.button_reply?.id || message.interactive?.list_reply?.id });
+
+        // Await message handling before responding —
+        // Vercel freezes the function after res is sent,
+        // so fire-and-forget async work will be killed.
+        try {
+          await handleMessage(from, message);
+        } catch (err) {
           console.error("Error handling message:", err);
-        });
+        }
       }
     } catch (err) {
       console.error("Webhook POST error:", err);
