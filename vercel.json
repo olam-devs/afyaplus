@@ -1,15 +1,25 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "api/webhook.js",
-      "use": "@vercel/node"
-    }
+    { "src": "api/webhook.js", "use": "@vercel/node" },
+    { "src": "api/cron/reminder.js", "use": "@vercel/node" },
+    { "src": "api/pesapal/ipn.js", "use": "@vercel/node" },
+    { "src": "api/pesapal/callback.js", "use": "@vercel/node" },
+    { "src": "public/**", "use": "@vercel/static" }
   ],
   "routes": [
+    { "src": "/api/webhook", "dest": "/api/webhook.js" },
+    { "src": "/api/cron/reminder", "dest": "/api/cron/reminder.js" },
+    { "src": "/api/pesapal/ipn", "dest": "/api/pesapal/ipn.js" },
+    { "src": "/api/pesapal/callback", "dest": "/api/pesapal/callback.js" },
+    { "src": "/profile", "dest": "/public/profile/index.html" },
+    { "src": "/profile/", "dest": "/public/profile/index.html" },
+    { "src": "/profile/(.*)", "dest": "/public/profile/$1" }
+  ],
+  "crons": [
     {
-      "src": "/api/webhook",
-      "dest": "/api/webhook.js"
+      "path": "/api/cron/reminder",
+      "schedule": "0 9 * * *"
     }
   ]
 }

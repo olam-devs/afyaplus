@@ -1,4 +1,4 @@
-const { handleMessage } = require("../lib/flow");
+const { handleMessage, checkReminders } = require("../lib/flow");
 
 module.exports = async function handler(req, res) {
   // ============ GET: Webhook Verification ============
@@ -37,6 +37,13 @@ module.exports = async function handler(req, res) {
           await handleMessage(from, message);
         } catch (err) {
           console.error("Error handling message:", err);
+        }
+
+        // Piggyback: check and send pending reminders to other users
+        try {
+          await checkReminders();
+        } catch (err) {
+          console.error("Reminder check error:", err);
         }
       }
     } catch (err) {
