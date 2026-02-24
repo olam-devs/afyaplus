@@ -1,21 +1,6 @@
 // Snippe payment webhook — handles payment.completed and payment.failed events
-const crypto = require("crypto");
 const { sendText } = require("../../lib/whatsapp");
 const { sendBookingEmail } = require("../../lib/email");
-
-// Best-effort signature verification
-function verifySignature(body, signature, secret) {
-  if (!secret || !signature) return true;
-  try {
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(JSON.stringify(body))
-      .digest("hex");
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-  } catch {
-    return false;
-  }
-}
 
 function fmtAmount(value, currency) {
   return `${currency || "TZS"} ${Number(value).toLocaleString()}`;
@@ -23,13 +8,6 @@ function fmtAmount(value, currency) {
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
-
-  const secret = process.env.SNIPPE_WEBHOOK_SECRET;
-  const signature = req.headers["x-webhook-signature"];
-  if (secret && !verifySignature(req.body, signature, secret)) {
-    console.error("Snippe webhook: invalid signature");
-    return res.status(401).json({ error: "Invalid signature" });
-  }
 
   const event = req.body;
   console.log("SNIPPE WEBHOOK:", event?.type, JSON.stringify(event?.data)?.slice(0, 300));
