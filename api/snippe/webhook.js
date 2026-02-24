@@ -1,6 +1,33 @@
 // Snippe payment webhook — handles payment.completed and payment.failed events
+// bodyParser disabled so we can read raw bytes for HMAC signature verification
+const crypto = require("crypto");
 const { sendText } = require("../../lib/whatsapp");
 const { sendBookingEmail } = require("../../lib/email");
+
+// Disable Vercel's automatic body parsing — we need the raw bytes
+module.exports.config = { api: { bodyParser: false } };
+
+// Read raw body from request stream
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function verifySignature(rawBody, signature, secret) {
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
 
 function fmtAmount(value, currency) {
   return `${currency || "TZS"} ${Number(value).toLocaleString()}`;
@@ -9,7 +36,27 @@ function fmtAmount(value, currency) {
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  const event = req.body;
+  // Read raw body for signature verification
+  const rawBody = await getRawBody(req);
+
+  // Verify signature if secret is configured
+  const secret = process.env.SNIPPE_WEBHOOK_SECRET;
+  if (secret) {
+    const signature = req.headers["x-webhook-signature"];
+    if (!signature || !verifySignature(rawBody, signature, secret)) {
+      console.error("Snippe webhook: invalid signature");
+      return res.status(401).json({ error: "Invalid signature" });
+    }
+  }
+
+  // Parse body after verification
+  let event;
+  try {
+    event = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    return res.status(400).json({ error: "Invalid JSON" });
+  }
+
   console.log("SNIPPE WEBHOOK:", event?.type, JSON.stringify(event?.data)?.slice(0, 300));
 
   try {
@@ -56,7 +103,7 @@ module.exports = async function handler(req, res) {
         );
       }
 
-      // ── Admin confirmation email with full booking details ──
+      // ── Admin confirmation email ──
       await sendBookingEmail({
         name,
         contactPhone,
