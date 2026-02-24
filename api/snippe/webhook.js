@@ -1,9 +1,9 @@
 // Snippe payment webhook — handles payment.completed and payment.failed events
-// Sends WhatsApp notifications to customer and admin
 const crypto = require("crypto");
 const { sendText } = require("../../lib/whatsapp");
+const { sendBookingEmail } = require("../../lib/email");
 
-// Best-effort signature verification (uses stringified body — works if key order matches)
+// Best-effort signature verification
 function verifySignature(body, signature, secret) {
   if (!secret || !signature) return true;
   try {
@@ -24,7 +24,6 @@ function fmtAmount(value, currency) {
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // Signature verification (optional — set SNIPPE_WEBHOOK_SECRET to enable)
   const secret = process.env.SNIPPE_WEBHOOK_SECRET;
   const signature = req.headers["x-webhook-signature"];
   if (secret && !verifySignature(req.body, signature, secret)) {
@@ -41,39 +40,55 @@ module.exports = async function handler(req, res) {
       const meta = d.metadata || {};
       const whatsappPhone = meta.whatsapp_phone;
       const lang = meta.lang || "sw";
-      const name = d.customer?.name || meta.customer_name || "Mteja";
+      const name = meta.customer_name || d.customer?.name || "Mteja";
       const service = meta.service_name || "Huduma";
+      const price = meta.service_price || "";
+      const contactPhone = meta.contact_phone || d.customer?.phone || "N/A";
+      const paymentPhone = meta.payment_phone || d.customer?.phone || "N/A";
       const amount = fmtAmount(d.amount?.value, d.amount?.currency);
       const ref = d.reference || d.external_reference || "";
-      const provider = d.channel?.provider || d.payment_method || "";
+      const provider = d.channel?.provider || d.payment_method || "N/A";
 
-      // ── Notify customer ──
+      // ── Warm thank-you to customer ──
       if (whatsappPhone) {
         const msg =
           lang === "sw"
-            ? `✅ *Malipo Yamepokelewa!*\n\nAsante ${name}! Malipo yako ya *${amount}* kwa huduma ya *${service}* yamefanikiwa.\n\nTimu yetu itawasiliana nawe hivi karibuni.\n\nRef: ${ref}`
-            : `✅ *Payment Received!*\n\nThank you ${name}! Your payment of *${amount}* for *${service}* was successful.\n\nThe Afya+ team will contact you shortly.\n\nRef: ${ref}`;
+            ? `✅ *Asante ${name}!*\n\nMalipo yako ya *${amount}* kwa huduma ya *${service}* yamepokelewa.\n\nTimu yetu ya Afya+ itawasiliana nawe mapema iwezekanavyo kuweka miadi yako.\n\nRef: ${ref}`
+            : `✅ *Thank you, ${name}!*\n\nYour payment of *${amount}* for *${service}* has been received.\n\nThe Afya+ team will get back to you shortly to schedule your appointment.\n\nRef: ${ref}`;
         await sendText(whatsappPhone, msg).catch((e) =>
           console.error("Snippe webhook: customer notify error:", e.message)
         );
       }
 
-      // ── Notify admin ──
+      // ── Admin WhatsApp alert with full booking details ──
       const adminPhone = process.env.ADMIN_WHATSAPP_NUMBER;
       if (adminPhone) {
         const adminMsg =
-          `💰 *Malipo Mapya — Afya+*\n\n` +
-          `Mteja: ${name}\n` +
-          `WhatsApp: ${whatsappPhone ? "+" + whatsappPhone : "N/A"}\n` +
-          `Simu: ${d.customer?.phone || "N/A"}\n` +
-          `Huduma: ${service}\n` +
-          `Kiasi: ${amount}\n` +
-          `Mbinu: ${provider || "N/A"}\n` +
-          `Ref: ${ref}`;
+          `💰 *Booking Confirmed — Afya+*\n\n` +
+          `👤 Mteja: ${name}\n` +
+          `📱 WhatsApp: +${whatsappPhone || "N/A"}\n` +
+          `📞 Simu ya Mawasiliano: ${contactPhone}\n` +
+          `💳 Simu ya Malipo: ${paymentPhone}\n` +
+          `🏥 Huduma: ${service}\n` +
+          `💵 Kiasi: ${amount}\n` +
+          `🔌 Mbinu: ${provider}\n` +
+          `🔖 Ref: ${ref}`;
         await sendText(adminPhone, adminMsg).catch((e) =>
           console.error("Snippe webhook: admin notify error:", e.message)
         );
       }
+
+      // ── Admin confirmation email with full booking details ──
+      await sendBookingEmail({
+        name,
+        contactPhone,
+        paymentPhone,
+        service,
+        price,
+        lang,
+        paymentStatus: "Completed",
+        paymentRef: ref,
+      }).catch((e) => console.error("Snippe webhook: confirmation email error:", e.message));
     }
 
     if (event.type === "payment.failed") {
@@ -81,15 +96,13 @@ module.exports = async function handler(req, res) {
       const meta = d.metadata || {};
       const whatsappPhone = meta.whatsapp_phone;
       const lang = meta.lang || "sw";
-      const reason =
-        d.failure_reason ||
-        (lang === "sw" ? "Tatizo la mtandao" : "Network issue");
+      const reason = d.failure_reason || (lang === "sw" ? "Tatizo la mtandao" : "Network issue");
 
       if (whatsappPhone) {
         const msg =
           lang === "sw"
-            ? `❌ *Malipo Hayakufanikiwa*\n\nSamahani, malipo yako hayakufanikiwa.\nSababu: ${reason}\n\nTafadhali jaribu tena kupitia kiungo ulichopewa, au wasiliana na Afya+ kwa msaada.`
-            : `❌ *Payment Failed*\n\nSorry, your payment was unsuccessful.\nReason: ${reason}\n\nPlease try again using the link you received, or contact Afya+ for assistance.`;
+            ? `❌ *Malipo Hayakufanikiwa*\n\nSamahani, malipo yako hayakufanikiwa.\nSababu: ${reason}\n\nTafadhali jaribu tena au wasiliana na Afya+ kwa msaada.`
+            : `❌ *Payment Failed*\n\nSorry, your payment was unsuccessful.\nReason: ${reason}\n\nPlease try again or contact Afya+ for assistance.`;
         await sendText(whatsappPhone, msg).catch((e) =>
           console.error("Snippe webhook: customer fail notify error:", e.message)
         );
