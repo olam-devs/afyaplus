@@ -4,9 +4,6 @@ const crypto = require("crypto");
 const { sendText } = require("../../lib/whatsapp");
 const { sendBookingEmail } = require("../../lib/email");
 
-// Disable Vercel's automatic body parsing — we need the raw bytes
-module.exports.config = { api: { bodyParser: false } };
-
 // Read raw body from request stream
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -33,7 +30,7 @@ function fmtAmount(value, currency) {
   return `${currency || "TZS"} ${Number(value).toLocaleString()}`;
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
   // Read raw body for signature verification
@@ -138,4 +135,9 @@ module.exports = async function handler(req, res) {
   }
 
   return res.status(200).json({ received: true });
-};
+}
+
+// Must be set AFTER handler is defined — setting it before module.exports
+// assignment would get wiped out when module.exports is reassigned
+handler.config = { api: { bodyParser: false } };
+module.exports = handler;
